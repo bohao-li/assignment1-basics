@@ -19,9 +19,10 @@ class BPETokenizerTrainer:
         Args:
             initial_vocab_size: The starting vocabulary size (typically 256 for all bytes).
         """
-        self.vocab_count = initial_vocab_size
-        self.merges: list[Tuple[int, int]] = []  # Stores the learned merge rules (bigrams)
+        self.vocab_count = initial_vocab_size + 1
+        self.merges: list[Tuple[bytes, bytes]] = []  # Stores the learned merge rules as bytes
         self.vocabulary: Dict[int, bytes] = {i: bytes([i]) for i in range(initial_vocab_size)} # For decoding
+        self.vocabulary[256] = b"<|endoftext|>"
 
     def _find_chunk_boundaries(
         self,
@@ -86,16 +87,36 @@ class BPETokenizerTrainer:
 
     def _get_most_used_bigram(self, bigrams: Dict[Tuple[int, int], int]) -> Tuple[int, int]:
         """
-        Finds the most frequently used bigram. If tied, prefers the one with the larger left token.
+        Finds the most frequently used bigram. When ties occur in frequency,
+        it prefers the lexicographically greater pair.
         """
         if not bigrams:
-            return (0, 0) # Return a default, non-meaningful bigram for empty case
-
-        most_used_bigram = max(
-            bigrams,
-            key=lambda bigram: (bigrams.get(bigram), bigram[0])
-        )
-        return most_used_bigram
+            return (0, 0)
+        
+        # We first find the maximum frequency.
+        max_frequency = max(bigrams.values())
+        
+        # Then we collect all bigrams that have this maximum frequency.
+        tied_bigrams = [bigram for bigram, freq in bigrams.items() if freq == max_frequency]
+        
+        # If there's more than one, we break the tie.
+        if len(tied_bigrams) > 1:
+            # Sort these tied bigrams by their concatenated byte string.
+            # The key for sorting is the byte string representation of the merged pair.
+            # Since we want the lexicographically *greatest* pair, we don't need `reverse=True`.
+            # Python's sort is ascending by default. The `max` call will then pick the last element.
+            # Let's write this a cleaner way that directly uses max.
+            
+            # This will correctly handle the tie-breaking by choosing the bigram whose
+            # concatenated byte string is the lexicographically largest.
+            most_used_bigram = max(
+                tied_bigrams,
+                key=lambda bigram: (self.vocabulary[bigram[0]], self.vocabulary[bigram[1]])
+            )
+            return most_used_bigram
+        else:
+            # No tie, so there's only one bigram with the max frequency.
+            return tied_bigrams[0]
 
     def _merge_pair_in_sequence(
         self, sequence: Tuple[int, ...], bigram_to_merge: Tuple[int, int], new_token_id: int
@@ -160,73 +181,42 @@ class BPETokenizerTrainer:
             byte_sequence = tuple(pretoken_str.encode("utf-8"))
             token_sequences_with_counts[byte_sequence] = count
 
-        # 2. Optimized BPE Training Loop
+        # 2. Simplified BPE Training Loop (without bigram cache optimization)
         # `current_token_sequences` will be updated with merged tokens in each step
         current_token_sequences = token_sequences_with_counts.copy()
         
-        # Initialize the bigram cache
-        bigram_cache = self._collect_token_pairs(current_token_sequences)
-        most_used_bigram = self._get_most_used_bigram(bigram_cache)
-
-        while self.vocab_count < target_vocab_size and bigram_cache and bigram_cache[most_used_bigram] > 1:
-            # Store the merge rule
-            self.merges.append(most_used_bigram)
-            self.vocab_count += 1
+        while self.vocab_count < target_vocab_size:
+            # Re-collect bigram counts in every loop
+            bigram_counts = self._collect_token_pairs(current_token_sequences)
+            most_used_bigram_ids = self._get_most_used_bigram(bigram_counts)
+            
+            # Check for termination conditions
+            if not bigram_counts or bigram_counts[most_used_bigram_ids] <= 1:
+                break
+            
+            # --- MODIFICATION: STORE MERGE AS BYTES ---
+            # Get the byte representations of the two tokens
+            b1 = self.vocabulary[most_used_bigram_ids[0]]
+            b2 = self.vocabulary[most_used_bigram_ids[1]]
+            
+            # Store the learned merge rule as a tuple of byte strings
+            self.merges.append((b1, b2))
             
             # Update vocabulary with the new token
-            self.vocabulary[self.vocab_count - 1] = self._merge_bytes(
-                self.vocabulary[most_used_bigram[0]],
-                self.vocabulary[most_used_bigram[1]]
-            )
+            self.vocabulary[self.vocab_count] = b1 + b2
+            self.vocab_count += 1
 
             new_token_sequences_for_iteration: Dict[Tuple[int, ...], int] = {}
-            affected_bigram_changes: Dict[Tuple[int, int], int] = defaultdict(int)
-
             for sequence, count in current_token_sequences.items():
-                occurrences = self._find_all_occurrences(sequence, most_used_bigram)
-                
-                if not occurrences:
-                    new_token_sequences_for_iteration[sequence] = count
-                    continue
-                
-                # Decrement counts of old bigrams affected by this sequence's merge
-                for pos in occurrences:
-                    if pos > 0: # Left context bigram
-                        affected_bigram_changes[(sequence[pos-1], sequence[pos])] -= count
-                    if pos + 2 < len(sequence): # Right context bigram
-                        affected_bigram_changes[(sequence[pos+1], sequence[pos+2])] -= count
-
                 # Perform the merge for this sequence
-                merged_seq = self._merge_pair_in_sequence(sequence, most_used_bigram, self.vocab_count - 1)
+                merged_seq = self._merge_pair_in_sequence(sequence, most_used_bigram_ids, self.vocab_count - 1)
                 new_token_sequences_for_iteration[merged_seq] = count
-
-                # Increment counts of new bigrams formed in this sequence
-                # Need to re-find occurrences in the *newly merged* sequence
-                # This part is a bit tricky: rebuild from scratch or track positions carefully.
-                # For simplicity and correctness in this example, we'll re-scan the new sequence
-                # which is generally faster than complex index tracking.
-                temp_bigrams_in_new_seq = self._collect_token_pairs({merged_seq: count})
-                for bg, bg_count in temp_bigrams_in_new_seq.items():
-                     affected_bigram_changes[bg] += bg_count # Add to changes
-
-            # Update the global bigram cache with all collected changes
-            for bigram, change in affected_bigram_changes.items():
-                bigram_cache[bigram] = bigram_cache.get(bigram, 0) + change
-                if bigram_cache[bigram] <= 0:
-                    del bigram_cache[bigram]
             
-            # Remove the merged bigram from the cache (its count should be 0 or less now)
-            if most_used_bigram in bigram_cache:
-                del bigram_cache[most_used_bigram]
-
             current_token_sequences = new_token_sequences_for_iteration
-            most_used_bigram = self._get_most_used_bigram(bigram_cache)
             
         print("\n--- Training Complete ---")
         print("Final merge rules (bigrams):", self.merges)
         print("Final vocabulary count:", self.vocab_count)
-        # print("Final token sequences (after all merges):", current_token_sequences)
-        # You could also store final_token_sequences as an attribute if needed
     
     def _merge_bytes(self, b1: bytes, b2: bytes) -> bytes:
         """Helper to concatenate bytes for vocabulary creation."""
