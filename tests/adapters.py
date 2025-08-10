@@ -591,7 +591,7 @@ def run_train_bpe(
     """
     from cs336_basics import bpe_tokenizer_trainer
 
-    trainer = bpe_tokenizer_trainer.BPETokenizerTrainer()
+    trainer = bpe_tokenizer_trainer.BPETokenizerTrainer(special_tokens=special_tokens)
     trainer.train(input_path, target_vocab_size=vocab_size)
 
     return (trainer.vocabulary, trainer.merges)

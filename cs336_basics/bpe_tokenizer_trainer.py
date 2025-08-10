@@ -1,6 +1,6 @@
 import os
 import regex as re
-from typing import BinaryIO, Dict, Tuple
+from typing import BinaryIO, Dict, Tuple, Set
 from collections import defaultdict
 
 
@@ -12,17 +12,41 @@ class BPETokenizerTrainer:
     # Regex pattern for initial pre-tokenization
     PAT = r"""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+"""
 
-    def __init__(self, initial_vocab_size: int = 256):
+    def __init__(
+        self,
+        initial_vocab_size: int = 256,
+        special_tokens: Set[str] = {"<|endoftext|>"},
+    ) -> None:
         """
         Initializes the BPE tokenizer trainer.
 
         Args:
             initial_vocab_size: The starting vocabulary size (typically 256 for all bytes).
+            special_tokens: A set of special token strings to be included in the vocabulary.
         """
-        self.vocab_count = initial_vocab_size + 1
-        self.merges: list[Tuple[bytes, bytes]] = []  # Stores the learned merge rules as bytes
-        self.vocabulary: Dict[int, bytes] = {i: bytes([i]) for i in range(initial_vocab_size)} # For decoding
-        self.vocabulary[256] = b"<|endoftext|>"
+        self.merges: list[Tuple[bytes, bytes]] = (
+            []
+        )  # Stores the learned merge rules as bytes
+        self.vocabulary: Dict[int, bytes] = {
+            i: bytes([i]) for i in range(initial_vocab_size)
+        }  # For decoding
+
+        # New: Store special tokens and their byte representations
+        self.special_tokens_set: Set[str] = special_tokens
+        self.special_tokens_bytes: Dict[int, bytes] = {}
+
+        # New: Add special tokens to the vocabulary and update the vocab count
+        self.vocab_count = initial_vocab_size
+        for token_str in sorted(list(self.special_tokens_set)):
+            token_bytes = token_str.encode("utf-8")
+            self.vocabulary[self.vocab_count] = token_bytes
+            self.special_tokens_bytes[self.vocab_count] = token_bytes
+            self.vocab_count += 1
+
+        # The split token is the first one in the sorted set
+        self.split_special_token: bytes = sorted(
+            [t.encode("utf-8") for t in self.special_tokens_set]
+        )[0]
 
     def _find_chunk_boundaries(
         self,
@@ -34,7 +58,9 @@ class BPETokenizerTrainer:
         Chunk the file into parts that can be counted independently.
         May return fewer chunks if the boundaries end up overlapping.
         """
-        assert isinstance(split_special_token, bytes), "Must represent special token as a bytestring"
+        assert isinstance(
+            split_special_token, bytes
+        ), "Must represent special token as a bytestring"
 
         # Get total file size in bytes
         file.seek(0, os.SEEK_END)
@@ -85,20 +111,24 @@ class BPETokenizerTrainer:
                 bigram_counts[bigram] += token_frequency
         return dict(bigram_counts)
 
-    def _get_most_used_bigram(self, bigrams: Dict[Tuple[int, int], int]) -> Tuple[int, int]:
+    def _get_most_used_bigram(
+        self, bigrams: Dict[Tuple[int, int], int]
+    ) -> Tuple[int, int]:
         """
         Finds the most frequently used bigram. When ties occur in frequency,
         it prefers the lexicographically greater pair.
         """
         if not bigrams:
             return (0, 0)
-        
+
         # We first find the maximum frequency.
         max_frequency = max(bigrams.values())
-        
+
         # Then we collect all bigrams that have this maximum frequency.
-        tied_bigrams = [bigram for bigram, freq in bigrams.items() if freq == max_frequency]
-        
+        tied_bigrams = [
+            bigram for bigram, freq in bigrams.items() if freq == max_frequency
+        ]
+
         # If there's more than one, we break the tie.
         if len(tied_bigrams) > 1:
             # Sort these tied bigrams by their concatenated byte string.
@@ -106,12 +136,15 @@ class BPETokenizerTrainer:
             # Since we want the lexicographically *greatest* pair, we don't need `reverse=True`.
             # Python's sort is ascending by default. The `max` call will then pick the last element.
             # Let's write this a cleaner way that directly uses max.
-            
+
             # This will correctly handle the tie-breaking by choosing the bigram whose
             # concatenated byte string is the lexicographically largest.
             most_used_bigram = max(
                 tied_bigrams,
-                key=lambda bigram: (self.vocabulary[bigram[0]], self.vocabulary[bigram[1]])
+                key=lambda bigram: (
+                    self.vocabulary[bigram[0]],
+                    self.vocabulary[bigram[1]],
+                ),
             )
             return most_used_bigram
         else:
@@ -119,7 +152,10 @@ class BPETokenizerTrainer:
             return tied_bigrams[0]
 
     def _merge_pair_in_sequence(
-        self, sequence: Tuple[int, ...], bigram_to_merge: Tuple[int, int], new_token_id: int
+        self,
+        sequence: Tuple[int, ...],
+        bigram_to_merge: Tuple[int, int],
+        new_token_id: int,
     ) -> Tuple[int, ...]:
         """
         Replaces all occurrences of bigram_to_merge in a single sequence with new_token_id.
@@ -135,8 +171,10 @@ class BPETokenizerTrainer:
                 new_sequence.append(sequence[i])
                 i += 1
         return tuple(new_sequence)
-    
-    def _find_all_occurrences(self, sequence: Tuple[int, ...], bigram: Tuple[int, int]) -> list[int]:
+
+    def _find_all_occurrences(
+        self, sequence: Tuple[int, ...], bigram: Tuple[int, int]
+    ) -> list[int]:
         """
         Helper function to find all occurrences of a bigram within a single sequence.
         Returns a list of starting indices of the bigram.
@@ -144,14 +182,16 @@ class BPETokenizerTrainer:
         occurrences = []
         i = 0
         while i < len(sequence) - 1:
-            if (sequence[i], sequence[i+1]) == bigram:
+            if (sequence[i], sequence[i + 1]) == bigram:
                 occurrences.append(i)
-                i += 2 # Jump past the merged pair
+                i += 2  # Jump past the merged pair
             else:
                 i += 1
         return occurrences
 
-    def train(self, data_file_path: str, target_vocab_size: int = 3000, num_processes: int = 4):
+    def train(
+        self, data_file_path: str, target_vocab_size: int = 3000, num_processes: int = 4
+    ):
         """
         Trains the BPE tokenizer.
 
@@ -164,16 +204,26 @@ class BPETokenizerTrainer:
 
         # 1. Initial Pre-tokenization and Byte Conversion
         with open(data_file_path, "rb") as f:
-            boundaries = self._find_chunk_boundaries(f, num_processes, b"<|endoftext|>")
+            # New: Use the stored split token
+            boundaries = self._find_chunk_boundaries(
+                f, num_processes, self.split_special_token
+            )
+            
+            special_token_pattern = "|".join(re.escape(token) for token in sorted(list(self.special_tokens_set), reverse=True))
 
             for start, end in zip(boundaries[:-1], boundaries[1:]):
                 f.seek(start)
                 chunk = f.read(end - start).decode("utf-8", errors="ignore")
-                chunk = chunk.replace("<|endoftext|>", "")
 
-                pretokens = re.findall(self.PAT, chunk)
-                for pretoken in pretokens:
-                    pretoken_counts[pretoken] += 1
+                # Split the chunk by the special token pattern
+                # This removes the special tokens from the text completely
+                parts = re.split(special_token_pattern, chunk)
+                
+                # Process each part independently
+                for part in parts:
+                    pretokens = re.findall(self.PAT, part)
+                    for pretoken in pretokens:
+                        pretoken_counts[pretoken] += 1
 
         # Convert string pretokens to tuples of byte integers
         token_sequences_with_counts: Dict[Tuple[int, ...], int] = {}
@@ -184,24 +234,24 @@ class BPETokenizerTrainer:
         # 2. Simplified BPE Training Loop (without bigram cache optimization)
         # `current_token_sequences` will be updated with merged tokens in each step
         current_token_sequences = token_sequences_with_counts.copy()
-        
+
         while self.vocab_count < target_vocab_size:
             # Re-collect bigram counts in every loop
             bigram_counts = self._collect_token_pairs(current_token_sequences)
             most_used_bigram_ids = self._get_most_used_bigram(bigram_counts)
-            
+
             # Check for termination conditions
             if not bigram_counts or bigram_counts[most_used_bigram_ids] <= 1:
                 break
-            
+
             # --- MODIFICATION: STORE MERGE AS BYTES ---
             # Get the byte representations of the two tokens
             b1 = self.vocabulary[most_used_bigram_ids[0]]
             b2 = self.vocabulary[most_used_bigram_ids[1]]
-            
+
             # Store the learned merge rule as a tuple of byte strings
             self.merges.append((b1, b2))
-            
+
             # Update vocabulary with the new token
             self.vocabulary[self.vocab_count] = b1 + b2
             self.vocab_count += 1
@@ -209,15 +259,17 @@ class BPETokenizerTrainer:
             new_token_sequences_for_iteration: Dict[Tuple[int, ...], int] = {}
             for sequence, count in current_token_sequences.items():
                 # Perform the merge for this sequence
-                merged_seq = self._merge_pair_in_sequence(sequence, most_used_bigram_ids, self.vocab_count - 1)
+                merged_seq = self._merge_pair_in_sequence(
+                    sequence, most_used_bigram_ids, self.vocab_count - 1
+                )
                 new_token_sequences_for_iteration[merged_seq] = count
-            
+
             current_token_sequences = new_token_sequences_for_iteration
-            
+
         print("\n--- Training Complete ---")
         print("Final merge rules (bigrams):", self.merges)
         print("Final vocabulary count:", self.vocab_count)
-    
+
     def _merge_bytes(self, b1: bytes, b2: bytes) -> bytes:
         """Helper to concatenate bytes for vocabulary creation."""
         return b1 + b2
@@ -231,7 +283,9 @@ if __name__ == "__main__":
     os.makedirs(dummy_data_dir, exist_ok=True)
     dummy_file_path = os.path.join(dummy_data_dir, "test.txt")
 
-    trainer = BPETokenizerTrainer()
+    # Example of using special tokens
+    special_tokens = {"<|endoftext|>", "<|im_start|>", "<|im_end|>"}
+    trainer = BPETokenizerTrainer(special_tokens=special_tokens)
     trainer.train(dummy_file_path, target_vocab_size=500)
 
     # You would typically save `trainer.merges` and `trainer.vocabulary` to disk
