@@ -1,4 +1,4 @@
-import re
+import regex as re
 import json
 from collections.abc import Iterable, Iterator
 
@@ -32,22 +32,10 @@ class Tokenizer:
         # Derived data structures for efficiency
         self._token_to_id: dict[bytes, int] = {
             v: k for k, v in vocab.items()
-        }  # Maps byte token to int ID
-        self._merges_map: dict[tuple[bytes, bytes], bytes] = {
-            (p1, p2): p1 + p2 for p1, p2 in merges
-        }  # Maps (token1, token2) pair to their merged result
+        }
 
         # Define the regex pattern for initial splitting (pre-tokenization)
-        # This is a common pattern inspired by GPT-2 tokenizers that separates:
-        # - Common contractions like 's, 't, 're, etc.
-        # - Words (unicode letters)
-        # - Numbers (unicode digits)
-        # - Non-alphanumeric characters (punctuation, symbols, etc.)
-        # - Remaining whitespace
-        self._PAT = re.compile(
-            r"""'s|'t|'re|'ve|'m|'ll|'d| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+""",
-            re.UNICODE,
-        )
+        self._PAT = r"""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+"""
 
         # Special tokens handling
         self._special_tokens_set: set[bytes] = set()
@@ -178,14 +166,11 @@ class Tokenizer:
             if part_bytes in self._special_tokens_set:
                 token_ids.append(self._token_to_id[part_bytes])
             else:
-                # This part is regular text, apply pre-tokenization and BPE merges
-                # Initial pre-tokenization based on self._PAT
-                pre_tokens_bytes: list[bytes] = [
-                    t.encode("utf-8") for t in self._PAT.findall(part)
-                ]
+                # This part is regular text, apply byte-level pre-tokenization and BPE merges
+                # The base tokens for byte-level BPE are the individual bytes of the string.
+                pre_tokens_bytes: list[bytes] = [bytes([b]) for b in part_bytes]
 
                 # Apply BPE merges iteratively until no more merges can be found
-                # This helper function will handle the entire merging process for a list of tokens
                 final_bpe_tokens_bytes = self._apply_all_merges(pre_tokens_bytes)
 
                 # Convert the final byte tokens to their integer IDs
@@ -193,15 +178,9 @@ class Tokenizer:
                     if bpe_token in self._token_to_id:
                         token_ids.append(self._token_to_id[bpe_token])
                     else:
-                        # This scenario should ideally not happen if vocabulary is complete,
-                        # but as a fallback, we could break it down to individual bytes or
-                        # use an unknown token ID if the pre-token is not in vocab.
-                        # For now, let's assume it's always in vocab.
-                        # In a real tokenizer, you'd likely break it down to individual bytes
-                        # or use a <unk> token. For this exercise, assume full coverage.
-                        print(
-                            f"Warning: Token '{bpe_token.decode('utf-8')}' not found in vocabulary during encoding."
-                        )
+                        # Fallback for tokens not in the vocabulary
+                        for byte in bpe_token:
+                            token_ids.append(byte)
 
         return token_ids
 
@@ -233,11 +212,7 @@ class Tokenizer:
         # applying each one as many times as possible to the *current* list of tokens.
 
         for pair1, pair2 in self._merges_list:
-            # Check if this merge pair exists in our pre-computed map
-            if (pair1, pair2) not in self._merges_map:
-                continue  # Skip if this merge rule isn't in our map (shouldn't happen with correct data)
-
-            merged_token = self._merges_map[(pair1, pair2)]
+            merged_token = pair1 + pair2
             new_tokens = []
             i = 0
             while i < len(current_tokens):
@@ -271,14 +246,15 @@ class Tokenizer:
         for token_id in ids:
             if token_id in self._id_to_token:
                 decoded_bytes_list.append(self._id_to_token[token_id])
+            elif 0 <= token_id <= 255:
+                # This ID corresponds to a single raw byte (0-255).
+                # We create a bytes object from this integer value.
+                decoded_bytes_list.append(bytes([token_id]))
             else:
-                # Handle unknown IDs, e.g., by skipping or inserting a replacement character.
-                # The prompt mentions Unicode replacement character for unknown symbols.
-                decoded_bytes_list.append(
-                    b"\xef\xbf\xbd"
-                )  # Unicode replacement character bytes
+                # Handle unknown IDs that are not a single byte.
+                # Use the Unicode replacement character for true unknowns.
+                decoded_bytes_list.append(b"\xef\xbf\xbd")
 
-        # Concatenate all bytes and then decode to string
-        return b"".join(decoded_bytes_list).decode(
-            "utf-8", errors="replace"
-        )  # Replace handles errors during decoding
+        # Concatenate all bytes and then decode to string.
+        # The 'errors="replace"' handles any remaining bytes that can't be decoded.
+        return b"".join(decoded_bytes_list).decode("utf-8", errors="replace")
