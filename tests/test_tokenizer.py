@@ -63,7 +63,7 @@ def get_tokenizer_from_vocab_merges_path(
             byte_encoded_special_token = special_token.encode("utf-8")
             if byte_encoded_special_token not in set(vocab.values()):
                 vocab[len(vocab)] = byte_encoded_special_token
-
+    
     merges = [
         (
             bytes([gpt2_byte_decoder[token] for token in merge_token_1]),

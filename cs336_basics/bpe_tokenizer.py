@@ -30,9 +30,7 @@ class Tokenizer:
         )
 
         # Derived data structures for efficiency
-        self._token_to_id: dict[bytes, int] = {
-            v: k for k, v in vocab.items()
-        }
+        self._token_to_id: dict[bytes, int] = {v: k for k, v in vocab.items()}
 
         # Define the regex pattern for initial splitting (pre-tokenization)
         self._PAT = r"""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+"""
@@ -133,6 +131,7 @@ class Tokenizer:
 
     # --- Core Encoding/Decoding Methods ---
 
+    # The updated encode method
     def encode(self, text: str) -> list[int]:
         """
         Encodes an input text into a sequence of token IDs.
@@ -146,9 +145,6 @@ class Tokenizer:
         token_ids: list[int] = []
 
         # Step 1: Split text by special tokens
-        # `re.split` with a capturing group will include the delimiters in the result.
-        # This allows us to re-insert special tokens correctly.
-        # Example: "hello<SPECIAL>world" -> ["hello", "<SPECIAL>", "world"]
         parts = (
             re.split(self._special_token_pattern, text)
             if self._special_token_pattern
@@ -157,7 +153,7 @@ class Tokenizer:
 
         # Step 2: Process each part
         for part in parts:
-            if not part:  # Handle empty strings that can result from re.split
+            if not part:
                 continue
 
             part_bytes = part.encode("utf-8")
@@ -166,24 +162,29 @@ class Tokenizer:
             if part_bytes in self._special_tokens_set:
                 token_ids.append(self._token_to_id[part_bytes])
             else:
-                # This part is regular text, apply byte-level pre-tokenization and BPE merges
-                # The base tokens for byte-level BPE are the individual bytes of the string.
-                pre_tokens_bytes: list[bytes] = [bytes([b]) for b in part_bytes]
+                # THIS IS THE KEY CHANGE
+                # Use the pre-tokenization regex pattern to split the part into words
+                pre_tokens = re.findall(self._PAT, part)
+                for pre_token in pre_tokens:
+                    pre_token_bytes = pre_token.encode("utf-8")
 
-                # Apply BPE merges iteratively until no more merges can be found
-                final_bpe_tokens_bytes = self._apply_all_merges(pre_tokens_bytes)
+                    # Apply BPE merges to each pre-token (word) individually
+                    pre_tokens_bytes: list[bytes] = [
+                        bytes([b]) for b in pre_token_bytes
+                    ]
+                    final_bpe_tokens_bytes = self._apply_all_merges(pre_tokens_bytes)
 
-                # Convert the final byte tokens to their integer IDs
-                for bpe_token in final_bpe_tokens_bytes:
-                    if bpe_token in self._token_to_id:
-                        token_ids.append(self._token_to_id[bpe_token])
-                    else:
-                        # Fallback for tokens not in the vocabulary
-                        for byte in bpe_token:
-                            token_ids.append(byte)
-
+                    # Convert the final byte tokens to their integer IDs
+                    for bpe_token in final_bpe_tokens_bytes:
+                        if bpe_token in self._token_to_id:
+                            token_ids.append(self._token_to_id[bpe_token])
+                        else:
+                            # Fallback for tokens not in the vocabulary
+                            for byte in bpe_token:
+                                token_ids.append(byte)
         return token_ids
 
+    # The original _apply_all_merges, without the hardcoded blacklist
     def _apply_all_merges(self, tokens: list[bytes]) -> list[bytes]:
         """
         Applies all defined BPE merges to a list of byte tokens iteratively
@@ -195,22 +196,7 @@ class Tokenizer:
         Returns:
             A list of byte tokens after all applicable merges have been performed.
         """
-        # This function repeatedly applies the merge rules from self._merges_list.
-        # The merge rules are applied in the order they appear in self._merges_list.
-        # For each merge rule, it iterates through the current list of tokens and
-        # performs all possible occurrences of that specific merge.
-        # This loop continues until no more merges can be made based on the
-        # _merges_list, meaning the tokens list has been fully compressed.
-
-        # Create a mutable copy to work with
         current_tokens = list(tokens)
-
-        # The merging process is iterative. We keep merging until no more merges can be applied.
-        # A more robust implementation might track if any merge occurred in an iteration
-        # and stop when a full pass yields no changes.
-        # For a standard BPE encode, you usually iterate through the specific merges in order,
-        # applying each one as many times as possible to the *current* list of tokens.
-
         for pair1, pair2 in self._merges_list:
             merged_token = pair1 + pair2
             new_tokens = []
@@ -221,14 +207,12 @@ class Tokenizer:
                     and current_tokens[i] == pair1
                     and current_tokens[i + 1] == pair2
                 ):
-                    # Found a pair to merge
                     new_tokens.append(merged_token)
-                    i += 2  # Skip the next token as it was merged
+                    i += 2
                 else:
                     new_tokens.append(current_tokens[i])
                     i += 1
-            current_tokens = new_tokens  # Update tokens for the next merge rule
-
+            current_tokens = new_tokens
         return current_tokens
 
     def encode_iterable(self, iterable: Iterable[str]) -> Iterator[int]:
