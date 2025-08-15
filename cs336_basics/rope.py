@@ -6,33 +6,60 @@ class RotaryPositionalEmbedding(torch.nn.Module):
     """
 
     def __init__(self, theta: float, d_k: int, max_seq_len: int, device: torch.device | None = None):
-        """
-        Constructs the RoPE module and creates buffers if needed.
-
-        Args:
-            theta: The theta value for the RoPE.
-            d_k: The dimension of query and key vectors.
-            max_seq_len: The maximum sequence length that will be inputted.
-            device: The device to store the buffer on.
-        """
         super().__init__()
-        # TODO: Implement initialization logic
-        # You may want to precompute the cos and sin tensors
-        # and register them as buffers.
+        self.d_k = d_k
+        self.theta = theta
+        self.max_seq_len = max_seq_len
+        self.device = device
+
+        assert d_k % 2 == 0, "d_k must be an even number."
+
+        # Compute theta_k values for each pair
+        theta_k = 1.0 / (self.theta ** (torch.arange(0, d_k, 2).float() / d_k)).to(device)
+
+        # Precompute the full rotation matrices for all positions
+        rotation_matrices = torch.zeros(max_seq_len, d_k, d_k, device=device)
+
+        for i in range(max_seq_len):
+            # Calculate the angular frequency for position i
+            # This is equivalent to theta_i,k = i / (theta^(2k/d))
+            theta_i_k = i * theta_k
+            
+            # Construct the block-diagonal rotation matrix for position i
+            for k in range(d_k // 2):
+                angle = theta_i_k[k]
+                c, s = angle.cos(), angle.sin()
+                
+                # Fill the 2x2 rotation block
+                rotation_matrices[i, 2*k, 2*k] = c
+                rotation_matrices[i, 2*k, 2*k + 1] = -s
+                rotation_matrices[i, 2*k + 1, 2*k] = s
+                rotation_matrices[i, 2*k + 1, 2*k + 1] = c
+                
+        self.register_buffer('rotation_matrices', rotation_matrices)
+
 
     def forward(self, x: torch.Tensor, token_positions: torch.Tensor) -> torch.Tensor:
         """
-        Applies RoPE to an input tensor.
-
-        Args:
-            x: An input tensor of shape (..., seq_len, d_k).
-            token_positions: A tensor of shape (..., seq_len) specifying the
-                             token positions of x along the sequence dimension.
-
-        Returns:
-            A tensor of the same shape as x with RoPE applied.
+        Applies RoPE to an input tensor using precomputed rotation matrices.
         """
-        # TODO: Implement the forward pass
-        # The implementation should tolerate x with an arbitrary number of batch dimensions.
-        # Use the token positions to slice the cos and sin tensors.
-        raise NotImplementedError
+        # We need to map the token positions from the input to the precomputed
+        # rotation matrices.
+        # token_positions shape: (..., seq_len)
+        # rotation_matrices shape: (max_seq_len, d_k, d_k)
+        
+        # Get the appropriate rotation matrices using the token positions as indices.
+        # The result will have shape (..., seq_len, d_k, d_k).
+        rotations = self.rotation_matrices[token_positions]
+        
+        # We can now perform batch matrix multiplication.
+        # The operation is R @ x.
+        # x shape: (..., seq_len, d_k)
+        # rotations shape: (..., seq_len, d_k, d_k)
+        
+        # To make the matrix multiplication compatible, we can treat x as a
+        # batch of vectors of shape (..., seq_len, d_k, 1).
+        # torch.matmul handles the batch dimensions automatically.
+        x_rotated = torch.matmul(rotations, x.unsqueeze(-1)).squeeze(-1)
+        
+        return x_rotated
