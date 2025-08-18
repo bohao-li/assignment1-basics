@@ -319,19 +319,7 @@ def run_transformer_block(
 
     transformer_block_module = TransformerBlock(d_model, num_heads, d_ff)
     
-    state_dict = {
-        'norm1.G': weights['ln1.weight'],
-        'attn.query_projection.weight': weights['attn.q_proj.weight'],
-        'attn.key_projection.weight': weights['attn.k_proj.weight'],
-        'attn.value_projection.weight': weights['attn.v_proj.weight'],
-        'attn.output_projection.weight': weights['attn.output_proj.weight'],
-        'norm2.G': weights['ln2.weight'],
-        'ffn.W1': weights['ffn.w1.weight'].T, 
-        'ffn.W3': weights['ffn.w3.weight'].T,
-        'ffn.W2': weights['ffn.w2.weight'].T, 
-    }
-    
-    transformer_block_module.load_state_dict(state_dict, strict=False)
+    transformer_block_module.load_state_dict(weights, strict=False)
     
     return transformer_block_module.forward(in_features)
     

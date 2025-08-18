@@ -40,11 +40,8 @@ class RMSNorm(nn.Module):
         # adding epsilon for numerical stability, and then taking the square root.
         rms = torch.sqrt(x.pow(2).mean(dim=-1, keepdim=True) + self.eps)
         
-        # Normalize the tensor by dividing it by the calculated RMS value.
-        x_norm = x / rms
-        
         # The final result is the normalized tensor scaled by the learnable parameter 'G'.
-        result = self.weight * x_norm
+        result = self.weight * x / rms
         
         return result.to(in_dtype)
         

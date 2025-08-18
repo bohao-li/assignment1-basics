@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 import math
 
+
 class SwiGLU(nn.Module):
     """
     Implements the SwiGLU (Swish Gated Linear Unit) feed-forward network,
@@ -20,7 +21,15 @@ class SwiGLU(nn.Module):
         multiple_of (int): The d_ff dimension will be rounded up to the
                            nearest multiple of this value. Defaults to 64.
     """
-    def __init__(self, d_model: int, d_ff_multiplier: float = 8/3, multiple_of: int = 64):
+
+    def __init__(
+        self,
+        d_model: int,
+        d_ff_multiplier: float = 8 / 3,
+        multiple_of: int = 64,
+        device: torch.device | None = None,
+        dtype: torch.dtype | None = None,
+    ):
         super().__init__()
         self.d_model = d_model
 
