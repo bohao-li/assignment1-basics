@@ -17,7 +17,7 @@ class RMSNorm(nn.Module):
         self.d_model = d_model
         self.eps = eps
         
-        self.G = nn.Parameter(
+        self.weight = nn.Parameter(
             torch.empty(d_model, device=device, dtype=dtype)
         )
 
@@ -44,7 +44,7 @@ class RMSNorm(nn.Module):
         x_norm = x / rms
         
         # The final result is the normalized tensor scaled by the learnable parameter 'G'.
-        result = self.G * x_norm
+        result = self.weight * x_norm
         
         return result.to(in_dtype)
         

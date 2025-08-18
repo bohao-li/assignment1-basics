@@ -161,16 +161,10 @@ def run_multihead_self_attention(
     
     causalMultiHeadSelfAttentionModule = CausalMultiHeadSelfAttention(d_model, num_heads)
     
-    causalMultiHeadSelfAttentionModule.query_projection.weight.data = q_proj_weight
-    causalMultiHeadSelfAttentionModule.key_projection.weight.data = k_proj_weight
-    causalMultiHeadSelfAttentionModule.value_projection.weight.data = v_proj_weight
-    causalMultiHeadSelfAttentionModule.output_projection.weight.data = o_proj_weight
-    
-    # The provided signature doesn't include bias terms, so we'll assume they should be set to None.
-    causalMultiHeadSelfAttentionModule.query_projection.bias = None
-    causalMultiHeadSelfAttentionModule.key_projection.bias = None
-    causalMultiHeadSelfAttentionModule.value_projection.bias = None
-    causalMultiHeadSelfAttentionModule.output_projection.bias = None
+    causalMultiHeadSelfAttentionModule.q_proj.weight.data = q_proj_weight
+    causalMultiHeadSelfAttentionModule.k_proj.weight.data = k_proj_weight
+    causalMultiHeadSelfAttentionModule.v_proj.weight.data = v_proj_weight
+    causalMultiHeadSelfAttentionModule.output_proj.weight.data = o_proj_weight
 
     # Now, run the forward pass
     return causalMultiHeadSelfAttentionModule.forward(in_features)
@@ -217,16 +211,10 @@ def run_multihead_self_attention_with_rope(
     
     causalMultiHeadSelfAttentionModule = CausalMultiHeadSelfAttention(d_model, num_heads, max_seq_len, theta)
     
-    causalMultiHeadSelfAttentionModule.query_projection.weight.data = q_proj_weight
-    causalMultiHeadSelfAttentionModule.key_projection.weight.data = k_proj_weight
-    causalMultiHeadSelfAttentionModule.value_projection.weight.data = v_proj_weight
-    causalMultiHeadSelfAttentionModule.output_projection.weight.data = o_proj_weight
-    
-    # The provided signature doesn't include bias terms, so we'll assume they should be set to None.
-    causalMultiHeadSelfAttentionModule.query_projection.bias = None
-    causalMultiHeadSelfAttentionModule.key_projection.bias = None
-    causalMultiHeadSelfAttentionModule.value_projection.bias = None
-    causalMultiHeadSelfAttentionModule.output_projection.bias = None
+    causalMultiHeadSelfAttentionModule.q_proj.weight.data = q_proj_weight
+    causalMultiHeadSelfAttentionModule.k_proj.weight.data = k_proj_weight
+    causalMultiHeadSelfAttentionModule.v_proj.weight.data = v_proj_weight
+    causalMultiHeadSelfAttentionModule.output_proj.weight.data = o_proj_weight
 
     # Now, run the forward pass
     return causalMultiHeadSelfAttentionModule.forward(in_features, token_positions = token_positions)

@@ -45,12 +45,12 @@ class CausalMultiHeadSelfAttention(nn.Module):
         self.d_v = d_model // num_heads
 
         # Linear projections for query, key, and value
-        self.query_projection = nn.Linear(d_model, d_model)
-        self.key_projection = nn.Linear(d_model, d_model)
-        self.value_projection = nn.Linear(d_model, d_model)
+        self.q_proj = nn.Linear(d_model, d_model, bias=False)
+        self.k_proj = nn.Linear(d_model, d_model, bias=False)
+        self.v_proj = nn.Linear(d_model, d_model, bias=False)
 
         # Final output projection
-        self.output_projection = nn.Linear(d_model, d_model)
+        self.output_proj = nn.Linear(d_model, d_model, bias=False)
 
         if max_seq_len is not None and theta is not None:
             self.rope_module = RotaryPositionalEmbedding(theta, self.d_k, max_seq_len, device)
@@ -78,29 +78,26 @@ class CausalMultiHeadSelfAttention(nn.Module):
         #    The shape becomes (batch_size, num_heads, seq_len, d_k)
 
         Q = (
-            self.query_projection(x)
+            self.q_proj(x)
             .view(batch_size, seq_len, self.num_heads, self.d_k)
             .transpose(1, 2)
         )
         K = (
-            self.key_projection(x)
+            self.k_proj(x)
             .view(batch_size, seq_len, self.num_heads, self.d_k)
             .transpose(1, 2)
         )
         V = (
-            self.value_projection(x)
+            self.v_proj(x)
             .view(batch_size, seq_len, self.num_heads, self.d_v)
             .transpose(1, 2)
         )
         
         if self.rope_module is not None:
-            if token_positions is not None:
-                Q = self.rope_module.forward(Q, token_positions)
-                K = self.rope_module.forward(K, token_positions)
-            else:
-                token_positions = torch.arange(self.max_seq_len, device=self.rope_module.device).unsqueeze(0)
-                Q = self.rope_module.forward(Q, token_positions)
-                K = self.rope_module.forward(K, token_positions)
+            if token_positions is None:
+                token_positions = torch.arange(seq_len, device=self.rope_module.device)
+            Q = self.rope_module.forward(Q, token_positions)
+            K = self.rope_module.forward(K, token_positions)
 
         # 2. Compute the attention scores: Q * K^T
         #    The resulting shape is (batch_size, num_heads, seq_len, seq_len)
@@ -142,4 +139,4 @@ class CausalMultiHeadSelfAttention(nn.Module):
 
         # 7. Apply the final output linear projection.
 
-        return self.output_projection(concat_output)
+        return self.output_proj(concat_output)
