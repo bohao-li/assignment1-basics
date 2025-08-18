@@ -45,9 +45,9 @@ class CausalMultiHeadSelfAttention(nn.Module):
         self.d_v = d_model // num_heads
 
         # Linear projections for query, key, and value
-        self.q_proj = nn.Linear(d_model, d_model, bias=False)
-        self.k_proj = nn.Linear(d_model, d_model, bias=False)
-        self.v_proj = nn.Linear(d_model, d_model, bias=False)
+        self.q_proj = nn.Linear(d_model, d_model, device=device, bias=False)
+        self.k_proj = nn.Linear(d_model, d_model, device=device, bias=False)
+        self.v_proj = nn.Linear(d_model, d_model, device=device, bias=False)
 
         # Final output projection
         self.output_proj = nn.Linear(d_model, d_model, bias=False)

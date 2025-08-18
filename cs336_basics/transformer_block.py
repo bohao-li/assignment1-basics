@@ -18,7 +18,7 @@ class TransformerBlock(nn.Module):
     ):
         super().__init__()
         self.ln1 = RMSNorm(d_model)
-        self.attn = CausalMultiHeadSelfAttention(d_model, num_heads, max_seq_len, theta)
+        self.attn = CausalMultiHeadSelfAttention(d_model, num_heads, max_seq_len, theta, device)
         self.ln2 = RMSNorm(d_model)
         self.ffn = SwiGLU(d_model, d_ff // d_model)
 

@@ -38,10 +38,12 @@ class RMSNorm(nn.Module):
         # Calculate the Root Mean Square (RMS) of the input tensor 'x'.
         # This involves squaring the tensor, taking the mean along the last dimension,
         # adding epsilon for numerical stability, and then taking the square root.
-        rms = torch.sqrt(x.pow(2).mean(dim=-1, keepdim=True) + self.eps)
+        rms = torch.sqrt(torch.mean(x.pow(2), dim=-1, keepdim=True) + self.eps)
+        
+        x_normalized = x / rms
         
         # The final result is the normalized tensor scaled by the learnable parameter 'G'.
-        result = self.weight * x / rms
+        result = self.weight * x_normalized
         
         return result.to(in_dtype)
         
