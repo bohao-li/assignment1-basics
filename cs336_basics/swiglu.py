@@ -39,20 +39,19 @@ class SwiGLU(nn.Module):
         self.d_ff = (d_ff_unrounded + multiple_of - 1) // multiple_of * multiple_of
 
         # Define nn.Linear layers for all projections, with NO bias terms.
-        # w1 for the SiLU branch (input d_model, output d_ff)
-        self.w1 = nn.Linear(d_model, self.d_ff, bias=False)
+        # Pass device and dtype as keyword arguments
+        self.w1 = nn.Linear(d_model, self.d_ff, bias=False, device=device, dtype=dtype)
 
         # w3 for the Sigmoid branch (input d_model, output d_ff)
-        self.w3 = nn.Linear(d_model, self.d_ff, bias=False)
+        # Pass device and dtype as keyword arguments
+        self.w3 = nn.Linear(d_model, self.d_ff, bias=False, device=device, dtype=dtype)
 
         # w2 for the output layer (input d_ff, output d_model)
-        self.w2 = nn.Linear(self.d_ff, d_model, bias=False)
+        # Pass device and dtype as keyword arguments
+        self.w2 = nn.Linear(self.d_ff, d_model, bias=False, device=device, dtype=dtype)
 
         # Activation functions
         self.silu = nn.SiLU()
-        self.sigmoid = nn.Sigmoid()
-
-        print(f"Initialized SwiGLU with d_model={d_model}, calculated d_ff={self.d_ff}")
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
@@ -64,16 +63,9 @@ class SwiGLU(nn.Module):
         Returns:
             torch.Tensor: Output tensor of shape (batch_size, seq_len, d_model).
         """
-        # Apply the first projection with SiLU activation
-        # Using self.w1(x) instead of x @ self.w1.weight directly
-        proj1_out = self.silu(self.w1(x))
-
-        # Apply the second projection with Sigmoid activation
-        # Using self.w3(x) instead of x @ self.w3.weight directly
-        proj2_out = self.w3(x)
 
         # Perform element-wise multiplication (gating mechanism)
-        gated_output = proj1_out * proj2_out
+        gated_output = self.silu(self.w1(x)) * self.w3(x)
 
         # Apply the final output projection
         # Using self.w2(gated_output) instead of gated_output @ self.w2.weight directly
