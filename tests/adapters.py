@@ -95,9 +95,9 @@ def run_swiglu(
     swigluModule = SwiGLU(d_model, d_ff/d_model)
     
     state_dict = {
-        "weight_proj_1": w1_weight.T,
-        "weight_proj_2": w3_weight.T,
-        "weight_out": w2_weight.T,
+        "W1": w1_weight.T,
+        "W3": w3_weight.T,
+        "W2": w2_weight.T,
     }
     swigluModule.load_state_dict(state_dict)
 
@@ -122,7 +122,8 @@ def run_scaled_dot_product_attention(
     Returns:
         Float[Tensor, " ... queries d_v"]: Output of SDPA
     """
-    raise NotImplementedError
+    from cs336_basics.attention import scaled_dot_product_attention
+    return scaled_dot_product_attention(Q, K, V, mask)
 
 
 def run_multihead_self_attention(
@@ -148,7 +149,7 @@ def run_multihead_self_attention(
         max_seq_len (int): Maximum sequence length to pre-cache if your implementation does that.
         q_proj_weight (Float[Tensor, "d_k d_in"]): Weights for the Q projection
         k_proj_weight (Float[Tensor, "d_k d_in"]): Weights for the K projection
-        v_proj_weight (Float[Tensor, "d_k d_in"]): Weights for the V projection
+        v_proj_weight (Float[Tensor, "d_v d_in"]): Weights for the V projection
         o_proj_weight (Float[Tensor, "d_model d_v"]): Weights for the output projection
         in_features (Float[Tensor, "... sequence_length d_in"]): Tensor to run your implementation on.
 
@@ -156,7 +157,23 @@ def run_multihead_self_attention(
         Float[Tensor, " ... sequence_length d_out"]: Tensor with the output of running your optimized, batched multi-headed attention
         implementation with the given QKV projection weights and input features.
     """
-    raise NotImplementedError
+    from cs336_basics.multi_head_self_attention import CausalMultiHeadSelfAttention
+    
+    causalMultiHeadSelfAttentionModule = CausalMultiHeadSelfAttention(d_model, num_heads)
+    
+    causalMultiHeadSelfAttentionModule.query_projection.weight.data = q_proj_weight
+    causalMultiHeadSelfAttentionModule.key_projection.weight.data = k_proj_weight
+    causalMultiHeadSelfAttentionModule.value_projection.weight.data = v_proj_weight
+    causalMultiHeadSelfAttentionModule.output_projection.weight.data = o_proj_weight
+    
+    # The provided signature doesn't include bias terms, so we'll assume they should be set to None.
+    causalMultiHeadSelfAttentionModule.query_projection.bias = None
+    causalMultiHeadSelfAttentionModule.key_projection.bias = None
+    causalMultiHeadSelfAttentionModule.value_projection.bias = None
+    causalMultiHeadSelfAttentionModule.output_projection.bias = None
+
+    # Now, run the forward pass
+    return causalMultiHeadSelfAttentionModule.forward(in_features)
 
 
 def run_multihead_self_attention_with_rope(
@@ -187,7 +204,7 @@ def run_multihead_self_attention_with_rope(
         theta (float): RoPE parameter.
         q_proj_weight (Float[Tensor, "d_k d_in"]): Weights for the Q projection
         k_proj_weight (Float[Tensor, "d_k d_in"]): Weights for the K projection
-        v_proj_weight (Float[Tensor, "d_k d_in"]): Weights for the V projection
+        v_proj_weight (Float[Tensor, "d_v d_in"]): Weights for the V projection
         o_proj_weight (Float[Tensor, "d_model d_v"]): Weights for the output projection
         in_features (Float[Tensor, "... sequence_length d_in"]): Tensor to run your implementation on.
         token_positions (Int[Tensor, " ... sequence_length"] | None): Optional tensor with the positions of the tokens
@@ -196,7 +213,23 @@ def run_multihead_self_attention_with_rope(
         Float[Tensor, " ... sequence_length d_out"]: Tensor with the output of running your optimized, batched multi-headed attention
         implementation with the given QKV projection weights and input features.
     """
-    raise NotImplementedError
+    from cs336_basics.multi_head_self_attention import CausalMultiHeadSelfAttention
+    
+    causalMultiHeadSelfAttentionModule = CausalMultiHeadSelfAttention(d_model, num_heads, max_seq_len, theta)
+    
+    causalMultiHeadSelfAttentionModule.query_projection.weight.data = q_proj_weight
+    causalMultiHeadSelfAttentionModule.key_projection.weight.data = k_proj_weight
+    causalMultiHeadSelfAttentionModule.value_projection.weight.data = v_proj_weight
+    causalMultiHeadSelfAttentionModule.output_projection.weight.data = o_proj_weight
+    
+    # The provided signature doesn't include bias terms, so we'll assume they should be set to None.
+    causalMultiHeadSelfAttentionModule.query_projection.bias = None
+    causalMultiHeadSelfAttentionModule.key_projection.bias = None
+    causalMultiHeadSelfAttentionModule.value_projection.bias = None
+    causalMultiHeadSelfAttentionModule.output_projection.bias = None
+
+    # Now, run the forward pass
+    return causalMultiHeadSelfAttentionModule.forward(in_features, token_positions = token_positions)
 
 
 def run_rope(
@@ -294,8 +327,26 @@ def run_transformer_block(
         Float[Tensor, "batch sequence_length d_model"] Tensor with the output of
         running the Transformer block on the input features while using RoPE.
     """
-    raise NotImplementedError
+    from cs336_basics.transformer_block import TransformerBlock
 
+    transformer_block_module = TransformerBlock(d_model, num_heads, d_ff)
+    
+    state_dict = {
+        'norm1.G': weights['ln1.weight'],
+        'attn.query_projection.weight': weights['attn.q_proj.weight'],
+        'attn.key_projection.weight': weights['attn.k_proj.weight'],
+        'attn.value_projection.weight': weights['attn.v_proj.weight'],
+        'attn.output_projection.weight': weights['attn.output_proj.weight'],
+        'norm2.G': weights['ln2.weight'],
+        'ffn.W1': weights['ffn.w1.weight'].T, 
+        'ffn.W3': weights['ffn.w3.weight'].T,
+        'ffn.W2': weights['ffn.w2.weight'].T, 
+    }
+    
+    transformer_block_module.load_state_dict(state_dict, strict=False)
+    
+    return transformer_block_module.forward(in_features)
+    
 
 def run_transformer_lm(
     vocab_size: int,

@@ -31,20 +31,20 @@ class SwiGLU(nn.Module):
 
         # Define weights as learnable parameters for the first projection (NO BIAS)
         # Weights for the SiLU branch (input d_model, output d_ff)
-        self.weight_proj_1 = nn.Parameter(torch.empty(d_model, self.d_ff))
+        self.W1 = nn.Parameter(torch.empty(d_model, self.d_ff))
 
         # Define weights as learnable parameters for the second projection (NO BIAS)
         # Weights for the Sigmoid branch (input d_model, output d_ff)
-        self.weight_proj_2 = nn.Parameter(torch.empty(d_model, self.d_ff))
+        self.W3 = nn.Parameter(torch.empty(d_model, self.d_ff))
 
         # Define weights as learnable parameters for the output projection (NO BIAS)
         # Weights for the output layer (input d_ff, output d_model)
-        self.weight_out = nn.Parameter(torch.empty(self.d_ff, d_model))
+        self.W2 = nn.Parameter(torch.empty(self.d_ff, d_model))
 
         # Initialize parameters using Kaiming uniform for weights
-        nn.init.kaiming_uniform_(self.weight_proj_1, a=math.sqrt(5))
-        nn.init.kaiming_uniform_(self.weight_proj_2, a=math.sqrt(5))
-        nn.init.kaiming_uniform_(self.weight_out, a=math.sqrt(5))
+        nn.init.kaiming_uniform_(self.W1, a=math.sqrt(5))
+        nn.init.kaiming_uniform_(self.W3, a=math.sqrt(5))
+        nn.init.kaiming_uniform_(self.W2, a=math.sqrt(5))
 
         # Activation functions
         self.silu = nn.SiLU()
@@ -63,15 +63,15 @@ class SwiGLU(nn.Module):
             torch.Tensor: Output tensor of shape (batch_size, seq_len, d_model).
         """
         # Apply the first projection with SiLU activation (NO BIAS)
-        proj1_out = self.silu(x @ self.weight_proj_1)
+        proj1_out = self.silu(x @ self.W1)
 
         # Apply the second projection with Sigmoid activation (NO BIAS)
-        proj2_out = x @ self.weight_proj_2
+        proj2_out = x @ self.W3
 
         # Perform element-wise multiplication (gating mechanism)
         gated_output = proj1_out * proj2_out
 
         # Apply the final output projection (NO BIAS)
-        output = gated_output @ self.weight_out
+        output = gated_output @ self.W2
 
         return output
