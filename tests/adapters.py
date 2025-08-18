@@ -95,9 +95,9 @@ def run_swiglu(
     swigluModule = SwiGLU(d_model, d_ff/d_model)
     
     state_dict = {
-        "W1": w1_weight.T,
-        "W3": w3_weight.T,
-        "W2": w2_weight.T,
+        "w1.weight": w1_weight,
+        "w3.weight": w3_weight,
+        "w2.weight": w2_weight,
     }
     swigluModule.load_state_dict(state_dict)
 
