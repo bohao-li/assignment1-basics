@@ -15,6 +15,7 @@ class TransformerBlock(nn.Module):
         max_seq_len: Optional[int] = None,
         theta: Optional[float] = None,
         device = None,
+        dtype = None,
     ):
         super().__init__()
         self.ln1 = RMSNorm(d_model)
