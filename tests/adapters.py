@@ -317,7 +317,7 @@ def run_transformer_block(
     """
     from cs336_basics.transformer_block import TransformerBlock
 
-    transformer_block_module = TransformerBlock(d_model, num_heads, d_ff)
+    transformer_block_module = TransformerBlock(d_model, num_heads, d_ff, max_seq_len, theta)
     
     transformer_block_module.load_state_dict(weights, strict=False)
     
@@ -429,7 +429,7 @@ def run_rmsnorm(
     from cs336_basics.rms_norm import RMSNorm
     
     rmsnormModule = RMSNorm(d_model, eps)
-    state_dict = {'G': weights}
+    state_dict = {'weight': weights}
     rmsnormModule.load_state_dict(state_dict)
 
     return rmsnormModule.forward(in_features)

@@ -92,7 +92,7 @@ class CausalMultiHeadSelfAttention(nn.Module):
             .view(batch_size, seq_len, self.num_heads, self.d_v)
             .transpose(1, 2)
         )
-        
+
         if self.rope_module is not None:
             if token_positions is None:
                 token_positions = torch.arange(seq_len, device=self.rope_module.device)
