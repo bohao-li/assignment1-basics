@@ -78,12 +78,15 @@ class AdamW(Optimizer):
                 step = state['step']
                 
                 exp_avg = beta1 * exp_avg + (1 - beta1) * grad
+                state['exp_avg'] = exp_avg # Store the updated 'm' back into the state
+                
                 exp_avg_sq = beta2 * exp_avg_sq + (1 - beta2) * grad.pow(2)
+                state['exp_avg_sq'] = exp_avg_sq # Store the updated 'v' back into the state
                 
                 lr_t = lr * (1 - beta2 ** step) ** 0.5 / (1 - beta1 ** step)
-                grad = grad - lr_t * exp_avg / (exp_avg_sq.sqrt() + eps)
-                grad = grad - lr * weight_decay * grad
-
-                p.data -= grad
+                
+                p.data = p.data - lr_t * exp_avg / (exp_avg_sq.sqrt() + eps)
+                
+                p.data = p.data - lr * weight_decay * p.data
 
         return loss
