@@ -1,15 +1,14 @@
 import os
 import regex as re
-from typing import BinaryIO, Dict, Tuple, Set
+import time
 from collections import defaultdict
-import argparse
-import pickle
-import json
+from typing import Dict, Tuple, Set, BinaryIO
+from tqdm import tqdm
 
 
 class BPETokenizerTrainer:
     """
-    A class to train a Byte Pair Encoding (BPE) tokenizer.
+    A class to train a Byte Pair Encoding (BPE) tokenizer with progress indicators.
     """
 
     # Regex pattern for initial pre-tokenization
@@ -65,12 +64,15 @@ class BPETokenizerTrainer:
             split_special_token, bytes
         ), "Must represent special token as a bytestring"
 
+        print("🔍 Finding chunk boundaries...")
+        
         # Get total file size in bytes
         file.seek(0, os.SEEK_END)
         file_size = file.tell()
         file.seek(0)
 
         chunk_size = file_size // desired_num_chunks
+        print(f"📊 File size: {file_size:,} bytes, Target chunks: {desired_num_chunks}, Chunk size: ~{chunk_size:,} bytes")
 
         # Initial guesses for chunk boundary locations, uniformly spaced
         # Chunks start on previous index, don't include last index
@@ -79,26 +81,31 @@ class BPETokenizerTrainer:
 
         mini_chunk_size = 4096  # Read ahead by 4k bytes at a time
 
-        for bi in range(1, len(chunk_boundaries) - 1):
-            initial_position = chunk_boundaries[bi]
-            file.seek(initial_position)  # Start at boundary guess
-            while True:
-                mini_chunk = file.read(mini_chunk_size)  # Read a mini chunk
+        # Progress bar for boundary finding
+        with tqdm(total=len(chunk_boundaries)-2, desc="Finding boundaries", unit="boundary") as pbar:
+            for bi in range(1, len(chunk_boundaries) - 1):
+                initial_position = chunk_boundaries[bi]
+                file.seek(initial_position)  # Start at boundary guess
+                while True:
+                    mini_chunk = file.read(mini_chunk_size)  # Read a mini chunk
 
-                # If EOF, this boundary should be at the end of the file
-                if mini_chunk == b"":
-                    chunk_boundaries[bi] = file_size
-                    break
+                    # If EOF, this boundary should be at the end of the file
+                    if mini_chunk == b"":
+                        chunk_boundaries[bi] = file_size
+                        break
 
-                # Find the special token in the mini chunk
-                found_at = mini_chunk.find(split_special_token)
-                if found_at != -1:
-                    chunk_boundaries[bi] = initial_position + found_at
-                    break
-                initial_position += mini_chunk_size
+                    # Find the special token in the mini chunk
+                    found_at = mini_chunk.find(split_special_token)
+                    if found_at != -1:
+                        chunk_boundaries[bi] = initial_position + found_at
+                        break
+                    initial_position += mini_chunk_size
+                pbar.update(1)
 
         # Make sure all boundaries are unique, but might be fewer than desired_num_chunks
-        return sorted(set(chunk_boundaries))
+        unique_boundaries = sorted(set(chunk_boundaries))
+        print(f"✅ Found {len(unique_boundaries)-1} unique chunks")
+        return unique_boundaries
 
     def _collect_token_pairs(
         self, token_sequences_with_counts: Dict[Tuple[int, ...], int]
@@ -108,10 +115,15 @@ class BPETokenizerTrainer:
         from a dictionary where keys are tuples of integers and values are their counts.
         """
         bigram_counts: Dict[Tuple[int, int], int] = defaultdict(int)
-        for token_sequence, token_frequency in token_sequences_with_counts.items():
-            for i in range(len(token_sequence) - 1):
-                bigram = (token_sequence[i], token_sequence[i + 1])
-                bigram_counts[bigram] += token_frequency
+        
+        # Add progress bar for bigram collection
+        with tqdm(total=len(token_sequences_with_counts), desc="Collecting bigrams", unit="seq", leave=False) as pbar:
+            for token_sequence, token_frequency in token_sequences_with_counts.items():
+                for i in range(len(token_sequence) - 1):
+                    bigram = (token_sequence[i], token_sequence[i + 1])
+                    bigram_counts[bigram] += token_frequency
+                pbar.update(1)
+        
         return dict(bigram_counts)
 
     def _get_most_used_bigram(
@@ -134,14 +146,6 @@ class BPETokenizerTrainer:
 
         # If there's more than one, we break the tie.
         if len(tied_bigrams) > 1:
-            # Sort these tied bigrams by their concatenated byte string.
-            # The key for sorting is the byte string representation of the merged pair.
-            # Since we want the lexicographically *greatest* pair, we don't need `reverse=True`.
-            # Python's sort is ascending by default. The `max` call will then pick the last element.
-            # Let's write this a cleaner way that directly uses max.
-
-            # This will correctly handle the tie-breaking by choosing the bigram whose
-            # concatenated byte string is the lexicographically largest.
             most_used_bigram = max(
                 tied_bigrams,
                 key=lambda bigram: (
@@ -200,39 +204,51 @@ class BPETokenizerTrainer:
             merges_file (str): Path to save the merges file
             vocab_file (str): Path to save the vocabulary file
         """
-        import os
+        print("💾 Saving merges and vocabulary...")
         
         # Create output directory if it doesn't exist
         os.makedirs(os.path.dirname(merges_file), exist_ok=True)
         os.makedirs(os.path.dirname(vocab_file), exist_ok=True)
         
-        # Save merges - each merge pair on a new line
+        # Save merges - each merge pair on a new line with progress
         with open(merges_file, 'w', encoding='utf-8') as f:
-            for merge in self.merges:
-                f.write(str(merge) + "\n")
+            with tqdm(total=len(self.merges), desc="Saving merges", unit="merge") as pbar:
+                for merge in self.merges:
+                    f.write(str(merge) + "\n")
+                    pbar.update(1)
         
-        # Save vocabulary - each key-value pair on a new line
+        # Save vocabulary - each key-value pair on a new line with progress
         with open(vocab_file, 'w', encoding='utf-8') as f:
-            for key, value in self.vocabulary.items():
-                f.write(f"{key}: {repr(value)}\n")
+            with tqdm(total=len(self.vocabulary), desc="Saving vocab", unit="token") as pbar:
+                for key, value in self.vocabulary.items():
+                    f.write(f"{key}: {repr(value)}\n")
+                    pbar.update(1)
         
-        print(f"Merges saved to: {merges_file}")
-        print(f"Vocabulary saved to: {vocab_file}")
+        print(f"✅ Merges saved to: {merges_file}")
+        print(f"✅ Vocabulary saved to: {vocab_file}")
 
     def train(
         self, data_file_path: str, target_vocab_size: int = 3000, num_processes: int = 4
     ):
         """
-        Trains the BPE tokenizer.
+        Trains the BPE tokenizer with progress indicators.
 
         Args:
             data_file_path: Path to the text file for training.
             target_vocab_size: The desired final vocabulary size.
             num_processes: Number of processes to use for initial chunking (serial in this example).
         """
+        start_time = time.time()
+        print(f"🚀 Starting BPE training...")
+        print(f"📁 Input file: {data_file_path}")
+        print(f"🎯 Target vocab size: {target_vocab_size:,}")
+        print(f"🔢 Starting vocab size: {self.vocab_count:,}")
+        print(f"📈 Merges needed: {target_vocab_size - self.vocab_count:,}")
+        
         pretoken_counts: Dict[str, int] = defaultdict(int)
 
         # 1. Initial Pre-tokenization and Byte Conversion
+        print("\n📖 Phase 1: Pre-tokenization and chunking")
         with open(data_file_path, "rb") as f:
             # New: Use the stored split token
             boundaries = self._find_chunk_boundaries(
@@ -241,40 +257,59 @@ class BPETokenizerTrainer:
             
             special_token_pattern = "|".join(re.escape(token) for token in sorted(list(self.special_tokens_set), reverse=True))
 
-            for start, end in zip(boundaries[:-1], boundaries[1:]):
-                f.seek(start)
-                chunk = f.read(end - start).decode("utf-8", errors="ignore")
+            # Process chunks with progress bar
+            print("🔤 Processing text chunks...")
+            chunk_pairs = list(zip(boundaries[:-1], boundaries[1:]))
+            
+            with tqdm(total=len(chunk_pairs), desc="Processing chunks", unit="chunk") as chunk_pbar:
+                for start, end in chunk_pairs:
+                    f.seek(start)
+                    chunk = f.read(end - start).decode("utf-8", errors="ignore")
 
-                # Split the chunk by the special token pattern
-                # This removes the special tokens from the text completely
-                parts = re.split(special_token_pattern, chunk)
-                
-                # Process each part independently
-                for part in parts:
-                    pretokens = re.findall(self.PAT, part)
-                    for pretoken in pretokens:
-                        pretoken_counts[pretoken] += 1
+                    # Split the chunk by the special token pattern
+                    # This removes the special tokens from the text completely
+                    parts = re.split(special_token_pattern, chunk)
+                    
+                    # Process each part independently
+                    for part in parts:
+                        pretokens = re.findall(self.PAT, part)
+                        for pretoken in pretokens:
+                            pretoken_counts[pretoken] += 1
+                    
+                    chunk_pbar.update(1)
+
+        print(f"📊 Found {len(pretoken_counts):,} unique pretokens")
 
         # Convert string pretokens to tuples of byte integers
+        print("🔄 Converting pretokens to byte sequences...")
         token_sequences_with_counts: Dict[Tuple[int, ...], int] = {}
-        for pretoken_str, count in pretoken_counts.items():
-            byte_sequence = tuple(pretoken_str.encode("utf-8"))
-            token_sequences_with_counts[byte_sequence] = count
+        
+        with tqdm(total=len(pretoken_counts), desc="Converting to bytes", unit="pretoken") as pbar:
+            for pretoken_str, count in pretoken_counts.items():
+                byte_sequence = tuple(pretoken_str.encode("utf-8"))
+                token_sequences_with_counts[byte_sequence] = count
+                pbar.update(1)
 
-        # 2. Simplified BPE Training Loop (without bigram cache optimization)
-        # `current_token_sequences` will be updated with merged tokens in each step
+        # 2. BPE Training Loop with Progress
+        print(f"\n🎯 Phase 2: BPE merge training")
         current_token_sequences = token_sequences_with_counts.copy()
+        
+        merges_needed = target_vocab_size - self.vocab_count
+        merge_pbar = tqdm(total=merges_needed, desc="Training merges", unit="merge")
 
+        iteration = 0
         while self.vocab_count < target_vocab_size:
+            iteration += 1
+            
             # Re-collect bigram counts in every loop
             bigram_counts = self._collect_token_pairs(current_token_sequences)
             most_used_bigram_ids = self._get_most_used_bigram(bigram_counts)
 
             # Check for termination conditions
             if not bigram_counts or bigram_counts[most_used_bigram_ids] <= 1:
+                print(f"\n⚠️  Early termination: No more frequent bigrams (iteration {iteration})")
                 break
 
-            # --- MODIFICATION: STORE MERGE AS BYTES ---
             # Get the byte representations of the two tokens
             b1 = self.vocabulary[most_used_bigram_ids[0]]
             b2 = self.vocabulary[most_used_bigram_ids[1]]
@@ -284,8 +319,18 @@ class BPETokenizerTrainer:
 
             # Update vocabulary with the new token
             self.vocabulary[self.vocab_count] = b1 + b2
+            
+            # Update progress bar with current merge info
+            merge_frequency = bigram_counts[most_used_bigram_ids]
+            merge_pbar.set_postfix({
+                'freq': f"{merge_frequency:,}",
+                'vocab': f"{self.vocab_count+1:,}",
+                'bigrams': f"{len(bigram_counts):,}"
+            })
+            
             self.vocab_count += 1
 
+            # Apply merge to all sequences
             new_token_sequences_for_iteration: Dict[Tuple[int, ...], int] = {}
             for sequence, count in current_token_sequences.items():
                 # Perform the merge for this sequence
@@ -295,8 +340,17 @@ class BPETokenizerTrainer:
                 new_token_sequences_for_iteration[merged_seq] = count
 
             current_token_sequences = new_token_sequences_for_iteration
+            merge_pbar.update(1)
 
-        print("\n--- Training Complete ---")
+        merge_pbar.close()
+        
+        # Training complete
+        elapsed_time = time.time() - start_time
+        print(f"\n✅ Training Complete!")
+        print(f"⏱️  Total time: {elapsed_time:.2f} seconds")
+        print(f"📊 Final vocabulary size: {self.vocab_count:,}")
+        print(f"🔄 Total merges learned: {len(self.merges):,}")
+        print(f"📈 Average time per merge: {elapsed_time/len(self.merges):.3f}s" if self.merges else "N/A")
 
     def _merge_bytes(self, b1: bytes, b2: bytes) -> bytes:
         """Helper to concatenate bytes for vocabulary creation."""
