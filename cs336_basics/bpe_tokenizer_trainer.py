@@ -13,7 +13,7 @@ class BPETokenizerTrainer:
     """
 
     # Regex pattern for initial pre-tokenization
-    PAT = re.compile("""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+""")
+    PAT = re.compile(r"""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+""")
 
     def __init__(
         self,
