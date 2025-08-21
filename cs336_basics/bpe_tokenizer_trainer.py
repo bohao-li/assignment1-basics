@@ -2,6 +2,9 @@ import os
 import regex as re
 from typing import BinaryIO, Dict, Tuple, Set
 from collections import defaultdict
+import argparse
+import pickle
+import json
 
 
 class BPETokenizerTrainer:
@@ -188,6 +191,33 @@ class BPETokenizerTrainer:
             else:
                 i += 1
         return occurrences
+    
+    def save_merges_and_vocab(self, merges_file, vocab_file):
+        """
+        Save the BPE merges and vocabulary to files with each item on a new line.
+        
+        Args:
+            merges_file (str): Path to save the merges file
+            vocab_file (str): Path to save the vocabulary file
+        """
+        import os
+        
+        # Create output directory if it doesn't exist
+        os.makedirs(os.path.dirname(merges_file), exist_ok=True)
+        os.makedirs(os.path.dirname(vocab_file), exist_ok=True)
+        
+        # Save merges - each merge pair on a new line
+        with open(merges_file, 'w', encoding='utf-8') as f:
+            for merge in self.merges:
+                f.write(str(merge) + "\n")
+        
+        # Save vocabulary - each key-value pair on a new line
+        with open(vocab_file, 'w', encoding='utf-8') as f:
+            for key, value in self.vocabulary.items():
+                f.write(f"{key}: {repr(value)}\n")
+        
+        print(f"Merges saved to: {merges_file}")
+        print(f"Vocabulary saved to: {vocab_file}")
 
     def train(
         self, data_file_path: str, target_vocab_size: int = 3000, num_processes: int = 4
@@ -267,28 +297,48 @@ class BPETokenizerTrainer:
             current_token_sequences = new_token_sequences_for_iteration
 
         print("\n--- Training Complete ---")
-        print("Final merge rules (bigrams):", self.merges)
-        print("Final vocabulary count:", self.vocab_count)
 
     def _merge_bytes(self, b1: bytes, b2: bytes) -> bytes:
         """Helper to concatenate bytes for vocabulary creation."""
         return b1 + b2
 
 
-# --- Usage Example ---
 if __name__ == "__main__":
-    # Create a dummy data file for demonstration
-    # In a real scenario, this would be your actual training data.
-    dummy_data_dir = "data"
-    os.makedirs(dummy_data_dir, exist_ok=True)
-    dummy_file_path = os.path.join(dummy_data_dir, "test.txt")
-
+    parser = argparse.ArgumentParser(description="Train a BPE tokenizer and save its merges and vocabulary.")
+    parser.add_argument("--input_file", type=str, required=True,
+                        help="Path to the input text file for training.")
+    parser.add_argument("--merges_file", type=str, default="output/bpe_merges.txt",
+                        help="Path to save the BPE merges file.")
+    parser.add_argument("--vocab_file", type=str, default="output/bpe_vocab.json",
+                        help="Path to save the BPE vocabulary file.")
+    parser.add_argument("--vocab_size", type=int, default=12000,
+                        help="Target vocabulary size for the tokenizer.")
+    args = parser.parse_args()
+    
+    # Validate input file exists
+    if not os.path.exists(args.input_file):
+        print(f"Error: Input file '{args.input_file}' does not exist.")
+        exit(1)
+    
+    # Create output directory if it doesn't exist
+    os.makedirs(os.path.dirname(args.merges_file), exist_ok=True)
+    os.makedirs(os.path.dirname(args.vocab_file), exist_ok=True)
+    
     # Example of using special tokens
-    special_tokens = {"<|endoftext|>", "<|im_start|>", "<|im_end|>"}
+    special_tokens = {"<|endoftext|>"}
     trainer = BPETokenizerTrainer(special_tokens=special_tokens)
-    trainer.train(dummy_file_path, target_vocab_size=500)
-
+    
+    print(f"Training BPE tokenizer on: {args.input_file}")
+    print(f"Target vocabulary size: {args.vocab_size}")
+    
+    trainer.train(args.input_file, target_vocab_size=args.vocab_size)
+    
+    trainer.save_merges_and_vocab(args.merges_file, args.vocab_file)
+    
+    print(f"\nMerges saved to: {args.merges_file}")
+    print(f"Vocabulary saved to: {args.vocab_file}")
+    print(f"Final vocabulary size: {len(trainer.vocabulary)}")
+    
     # You would typically save `trainer.merges` and `trainer.vocabulary` to disk
     # for later use in an actual tokenizer (encoding/decoding).
-    print("\nTrainer merges:", trainer.merges)
-    print("\nTrainer vocabulary:", trainer.vocabulary)
+    print("\nTraining completed successfully!")

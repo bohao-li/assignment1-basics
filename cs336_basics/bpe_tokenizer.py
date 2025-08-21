@@ -66,6 +66,7 @@ class Tokenizer:
                 "(" + "|".join(special_token_re_patterns) + ")"
             )
 
+    
     @classmethod
     def from_files(
         cls,
@@ -75,58 +76,68 @@ class Tokenizer:
     ):
         """
         Class method to construct a Tokenizer from serialized files.
-
+        
         Args:
-            vocab_filepath: The path to the serialized vocabulary file (expected JSON string).
-            merges_filepath: The path to the serialized merges file (expected space-separated pairs).
+            vocab_filepath: The path to the vocabulary file (format: "key: repr(value)" per line).
+            merges_filepath: The path to the merges file (format: repr(tuple) per line).
             special_tokens: An optional list of special tokens (as strings).
-
+        
         Returns:
             A Tokenizer instance.
         """
-        # Load the vocabulary from the JSON file
+        import ast
+        
+        # Load the vocabulary from the file
         vocab_int_to_bytes = {}
         try:
             with open(vocab_filepath, "r", encoding="utf-8") as f:
-                parsed_vocab_str_to_int = json.load(f)  # Directly load JSON
-                # Convert the parsed dictionary to the required int -> bytes format
-                for token_str, token_id in parsed_vocab_str_to_int.items():
-                    vocab_int_to_bytes[token_id] = token_str.encode("utf-8")
-
+                for line in f:
+                    line = line.strip()
+                    if line:
+                        # Split on first colon to separate key from value
+                        key_str, value_str = line.split(': ', 1)
+                        key = int(key_str)
+                        value = ast.literal_eval(value_str)
+                        vocab_int_to_bytes[key] = value
         except FileNotFoundError:
             raise FileNotFoundError(f"Vocabulary file not found at {vocab_filepath}")
-        except json.JSONDecodeError as e:
+        except ValueError as e:
             raise ValueError(
-                f"Error decoding JSON from vocabulary file: {vocab_filepath} - {e}"
+                f"Error parsing vocabulary file: {vocab_filepath} - {e}"
             )
         except Exception as e:
             raise RuntimeError(
                 f"An unexpected error occurred while loading vocabulary: {e}"
             )
-
+        
         # Load the merges from the file
         merges_list_of_tuples_bytes = []
         try:
             with open(merges_filepath, "r", encoding="utf-8") as f:
                 for line in f:
-                    parts = line.strip().split()
-                    if len(parts) == 2:
-                        # Encode the merge parts to bytes before adding to the list
-                        merges_list_of_tuples_bytes.append(
-                            (parts[0].encode("utf-8"), parts[1].encode("utf-8"))
-                        )
-                    else:
-                        print(
-                            f"Warning: Skipping malformed line in merges file: {line.strip()}"
-                        )
+                    line = line.strip()
+                    if line:
+                        try:
+                            # Parse the tuple representation
+                            merge_pair = ast.literal_eval(line)
+                            if isinstance(merge_pair, tuple) and len(merge_pair) == 2:
+                                merges_list_of_tuples_bytes.append(merge_pair)
+                            else:
+                                print(
+                                    f"Warning: Skipping malformed merge pair: {line}"
+                                )
+                        except (ValueError, SyntaxError):
+                            print(
+                                f"Warning: Skipping unparseable line in merges file: {line}"
+                            )
         except FileNotFoundError:
             raise FileNotFoundError(f"Merges file not found at {merges_filepath}")
         except Exception as e:
             raise RuntimeError(
                 f"An unexpected error occurred while loading merges: {e}"
             )
-
-        # Create and return a new Tokenizer instance, passing the correctly formatted data
+        
+        # Create and return a new Tokenizer instance
         return cls(vocab_int_to_bytes, merges_list_of_tuples_bytes, special_tokens)
 
     # --- Core Encoding/Decoding Methods ---
@@ -242,3 +253,4 @@ class Tokenizer:
         # Concatenate all bytes and then decode to string.
         # The 'errors="replace"' handles any remaining bytes that can't be decoded.
         return b"".join(decoded_bytes_list).decode("utf-8", errors="replace")
+
