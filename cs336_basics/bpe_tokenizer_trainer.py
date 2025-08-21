@@ -12,7 +12,7 @@ class BPETokenizerTrainer:
     """
 
     # Regex pattern for initial pre-tokenization
-    PAT = r"""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+"""
+    PAT = re.compile("""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+""")
 
     def __init__(
         self,
@@ -272,7 +272,7 @@ class BPETokenizerTrainer:
                     
                     # Process each part independently
                     for part in parts:
-                        pretokens = re.findall(self.PAT, part)
+                        pretokens = self.PAT.findall(part)
                         for pretoken in pretokens:
                             pretoken_counts[pretoken] += 1
                     
