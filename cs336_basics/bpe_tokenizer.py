@@ -253,4 +253,10 @@ class Tokenizer:
         # Concatenate all bytes and then decode to string.
         # The 'errors="replace"' handles any remaining bytes that can't be decoded.
         return b"".join(decoded_bytes_list).decode("utf-8", errors="replace")
+    
+    def vocab_size(self) -> int:
+        """
+        Returns the total size of the vocabulary, including special tokens.
+        """
+        return len(self._id_to_token)
 
