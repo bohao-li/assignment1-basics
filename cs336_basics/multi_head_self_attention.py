@@ -50,7 +50,7 @@ class CausalMultiHeadSelfAttention(nn.Module):
         self.v_proj = nn.Linear(d_model, d_model, device=device, bias=False)
 
         # Final output projection
-        self.output_proj = nn.Linear(d_model, d_model, bias=False)
+        self.output_proj = nn.Linear(d_model, d_model, device=device, bias=False)
 
         if max_seq_len is not None and theta is not None:
             self.rope_module = RotaryPositionalEmbedding(theta, self.d_k, max_seq_len, device)

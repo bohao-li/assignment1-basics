@@ -4,26 +4,15 @@ import torch.optim as optim
 import os
 import logging
 from datetime import datetime
-import regex as re
+# import regex as re # Removed as it's not used in this script
 
 # Import your actual Tokenizer and TransformerLanguageModel
-from cs336_basics.bpe_tokenizer import Tokenizer
+# Ensure these are correctly set up in your cs336_basics package
 from cs336_basics.transformer_lm import TransformerLanguageModel
 
 
 # --- Configure logging ---
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
-
-# --- Placeholders for your components (modified) ---
-def load_bpe_tokenizer(vocab_filepath, merges_filepath, special_tokens=None):
-    """
-    Loads your BPE tokenizer using the provided Tokenizer class from cs336_basics.
-    """
-    logging.info(f"Loading BPE tokenizer from vocab: {vocab_filepath}, merges: {merges_filepath}...")
-    return Tokenizer.from_files(vocab_filepath, merges_filepath, special_tokens)
-
-# The embedding_conversion_layer function has been removed as it's no longer used,
-# as the TransformerLanguageModel handles token embeddings internally.
 
 def transformer_lm(vocab_size, d_model, num_layers, context_length, num_heads, d_ff, rope_theta, device, dtype):
     """
@@ -79,28 +68,30 @@ class MemoryMappedDataset(torch.utils.data.Dataset):
 class TrainingConfig:
     def __init__(self,
                  model_name="my_transformer_lm",
-                 vocab_filepath="",
-                 merges_filepath="",
-                 special_tokens=["<|endoftext|>"],
+                 vocab_filepath="", # Not strictly used in this script but good to keep
+                 merges_filepath="", # Not strictly used in this script but good to keep
+                 special_tokens=["<|endoftext|>"], # Not strictly used in this script but good to keep
                  train_data_path="",
                  val_data_path="",
                  checkpoint_dir="./checkpoints",
-                 log_interval_steps=100,
-                 eval_interval_steps=500,
-                 epochs=1,
-                 batch_size=32,
-                 sequence_length=256, # This will be the context_length for your TransformerLM
-                 d_model=512,
-                 num_layers=6,
-                 num_heads=8,
-                 d_ff=2048, # New parameter for TransformerLanguageModel
-                 rope_theta=10000.0, # New parameter for TransformerLanguageModel
+                 log_interval_steps=10, # Reduced for mini run
+                 eval_interval_steps=20, # Reduced for mini run
+                 vocab_size=12000,
+                 epochs=2, # Reduced for mini run
+                 batch_size=16, # Reduced for mini run
+                 sequence_length=64, # Reduced for mini run, context_length for TransformerLM
+                 d_model=64, # Reduced for mini run
+                 num_layers=2, # Reduced for mini run
+                 num_heads=4, # Reduced for mini run
+                 d_ff=128, # Reduced for mini run
+                 rope_theta=10000.0,
                  learning_rate=3e-4,
                  weight_decay=0.01,
                  gradient_accumulation_steps=1,
                  max_grad_norm=1.0,
-                 device="cuda" if torch.cuda.is_available() else "cpu",
-                 dtype=torch.float32): # New parameter for TransformerLanguageModel
+                 # Prioritize 'mps' for Mac, then 'cuda', then 'cpu'
+                 device="mps" if torch.backends.mps.is_available() else ("cuda" if torch.cuda.is_available() else "cpu"),
+                 dtype=torch.float32):
         self.model_name = model_name
         self.vocab_filepath = vocab_filepath
         self.merges_filepath = merges_filepath
@@ -110,6 +101,7 @@ class TrainingConfig:
         self.checkpoint_dir = checkpoint_dir
         self.log_interval_steps = log_interval_steps
         self.eval_interval_steps = eval_interval_steps
+        self.vocab_size = vocab_size
         self.epochs = epochs
         self.batch_size = batch_size
         self.sequence_length = sequence_length
@@ -140,15 +132,9 @@ def train(config: TrainingConfig):
     """
     logging.info(f"Starting training with the following configuration:\n{config}")
 
-    # 1. Load Tokenizer and get vocab size
-    tokenizer = load_bpe_tokenizer(config.vocab_filepath, config.merges_filepath, config.special_tokens)
-    vocab_size = tokenizer.vocab_size()
-    logging.info(f"Tokenizer loaded. Vocabulary size: {vocab_size}")
-
     # 2. Initialize Model Components
-    # Removed explicit embedding_layer initialization as it's handled by TransformerLanguageModel
     model = transformer_lm(
-        vocab_size=vocab_size,
+        vocab_size=config.vocab_size,
         d_model=config.d_model,
         num_layers=config.num_layers,
         context_length=config.sequence_length, # context_length maps to sequence_length
@@ -161,11 +147,10 @@ def train(config: TrainingConfig):
 
     # 3. Optimizer and Loss Function
     optimizer = optim.AdamW(model.parameters(), lr=config.learning_rate, weight_decay=config.weight_decay)
-    # For language modeling, CrossEntropyLoss is typical for predicting next token
-    # Ensure targets are within vocab_size, ignoring -1 for padding if used
-    loss_fn = torch.nn.CrossEntropyLoss(ignore_index=-1)
+    loss_fn = torch.nn.CrossEntropyLoss(ignore_index=-1) # -1 can be used for padding if needed
 
     # 4. Data Loaders
+    # Using the same data file for both train and val for a quick test run
     train_dataset = MemoryMappedDataset(config.train_data_path, config.sequence_length)
     val_dataset = MemoryMappedDataset(config.val_data_path, config.sequence_length)
 
@@ -173,7 +158,7 @@ def train(config: TrainingConfig):
         train_dataset,
         batch_size=config.batch_size,
         shuffle=True,
-        num_workers=0, # Set to > 0 for multi-process data loading if needed
+        num_workers=0, # Keep at 0 for simplicity in a mini test run on MPS
         pin_memory=True # For faster data transfer to GPU
     )
     val_loader = torch.utils.data.DataLoader(
@@ -190,10 +175,6 @@ def train(config: TrainingConfig):
     global_step = 0
     best_val_loss = float('inf')
 
-    # Weights and Biases (or similar external logging service)
-    # import wandb
-    # wandb.init(project="your_project_name", config=config.__dict__)
-
     for epoch in range(config.epochs):
         model.train()
         total_train_loss = 0
@@ -205,11 +186,11 @@ def train(config: TrainingConfig):
 
             # Forward pass through the transformer LM
             # logits shape: (batch_size, sequence_length, vocab_size)
-            logits = model(inputs) # Model now handles token embeddings internally
+            logits = model(inputs)
 
             # Reshape logits to (batch_size * sequence_length, vocab_size)
             # Reshape targets to (batch_size * sequence_length)
-            loss = loss_fn(logits.view(-1, vocab_size), targets.view(-1))
+            loss = loss_fn(logits.view(-1, config.vocab_size), targets.view(-1))
 
             # Normalize loss by gradient accumulation steps
             loss = loss / config.gradient_accumulation_steps
@@ -228,22 +209,19 @@ def train(config: TrainingConfig):
                 if global_step % config.log_interval_steps == 0:
                     avg_loss = total_train_loss / train_batch_count if train_batch_count > 0 else 0
                     logging.info(f"Epoch {epoch+1}, Step {global_step}, Train Loss: {avg_loss:.4f}")
-                    # wandb.log({"train_loss": avg_loss}, step=global_step)
                     total_train_loss = 0
                     train_batch_count = 0
 
-                if global_step % config.eval_interval_steps == 0:
-                    val_loss = evaluate(model, val_loader, loss_fn, config, vocab_size)
-                    logging.info(f"Epoch {epoch+1}, Step {global_step}, Validation Loss: {val_loss:.4f}")
-                    # wandb.log({"val_loss": val_loss}, step=global_step)
+                # if global_step % config.eval_interval_steps == 0:
+                #     val_loss = evaluate(model, val_loader, loss_fn, config, config.vocab_size)
+                #     logging.info(f"Epoch {epoch+1}, Step {global_step}, Validation Loss: {val_loss:.4f}")
 
                     # Save checkpoint if validation loss improves
-                    if val_loss < best_val_loss:
-                        best_val_loss = val_loss
-                        save_checkpoint(model, optimizer, config, global_step, best_val_loss)
+                    # if val_loss < best_val_loss:
+                    #     best_val_loss = val_loss
+                    #     save_checkpoint(model, optimizer, config, global_step, best_val_loss)
 
     logging.info("Training complete.")
-    # wandb.finish()
 
 
 def evaluate(model, data_loader, loss_fn, config: TrainingConfig, vocab_size: int):
@@ -256,7 +234,7 @@ def evaluate(model, data_loader, loss_fn, config: TrainingConfig, vocab_size: in
         for inputs, targets in data_loader:
             inputs, targets = inputs.to(config.device), targets.to(config.device)
 
-            logits = model(inputs) # Model now handles token embeddings internally
+            logits = model(inputs)
 
             loss = loss_fn(logits.view(-1, vocab_size), targets.view(-1))
             total_loss += loss.item() * inputs.size(0) # Multiply by batch size for correct average
@@ -287,24 +265,33 @@ def main():
     """
     Main entry point for the training script.
     """
-    # Create a configuration object
+    # Create a configuration object with mini hyperparameters and MPS device
     config = TrainingConfig(
-        epochs=5,
-        batch_size=16,
-        sequence_length=128,
-        d_model=256,
-        num_layers=4,
-        num_heads=4,
-        d_ff=1024,
+        epochs=2, # Very short run
+        batch_size=8, # Small batch size
+        sequence_length=32, # Short sequences
+        vocab_size=12000, # Assuming this is your actual vocab size
+        d_model=32, # Tiny model dimension
+        num_layers=2, # Very few layers
+        num_heads=4, # Few attention heads
+        d_ff=64, # Small feed-forward dimension
         rope_theta=10000.0,
         learning_rate=1e-4,
-        vocab_filepath="../data/bpe_vocab.json",
-        merges_filepath="../data/bpe_merges.txt",
-        special_tokens=["<|endoftext|>"],
-        train_data_path="../data/test.txt",
-        val_data_path="../data/test.txt",
-        checkpoint_dir="./my_model_checkpoints"
+        # IMPORTANT: Adjust these paths to your actual small binary data files
+        train_data_path="../data/val.bin", # Using val.bin for both for a quick test
+        val_data_path="../data/val.bin",
+        checkpoint_dir="./my_model_checkpoints",
+        device="mps"
     )
+
+    logging.info(f"Using device: {config.device}")
+    if config.device == "mps":
+        logging.info("MPS (Metal Performance Shaders) is available and will be used.")
+    elif config.device == "cuda":
+        logging.info("CUDA is available and will be used.")
+    else:
+        logging.info("No GPU detected, training on CPU.")
+
 
     # Run the training loop
     train(config)

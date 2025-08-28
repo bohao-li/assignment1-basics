@@ -18,10 +18,10 @@ class TransformerBlock(nn.Module):
         dtype = None,
     ):
         super().__init__()
-        self.ln1 = RMSNorm(d_model)
+        self.ln1 = RMSNorm(d_model, device=device)
         self.attn = CausalMultiHeadSelfAttention(d_model, num_heads, max_seq_len, theta, device)
-        self.ln2 = RMSNorm(d_model)
-        self.ffn = SwiGLU(d_model, d_ff // d_model)
+        self.ln2 = RMSNorm(d_model, device=device)
+        self.ffn = SwiGLU(d_model, d_ff // d_model, device=device)
 
     def forward(self, x):
         y = x + self.attn.forward(self.ln1(x))
