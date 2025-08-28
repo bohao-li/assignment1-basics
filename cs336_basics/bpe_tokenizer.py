@@ -1,5 +1,4 @@
-import regex as re
-import json
+import regex
 from collections.abc import Iterable, Iterator
 
 
@@ -28,6 +27,7 @@ class Tokenizer:
         self._merges_list: list[tuple[bytes, bytes]] = (
             merges  # Ordered list of merge rules (pair -> new_token)
         )
+        self._merge_ranks = {pair: rank for rank, pair in enumerate(self._merges_list)}
 
         # Derived data structures for efficiency
         self._token_to_id: dict[bytes, int] = {v: k for k, v in vocab.items()}
@@ -56,13 +56,13 @@ class Tokenizer:
         if self._special_tokens_set:
             # Sort by length descending to ensure longer special tokens are matched first
             special_token_re_patterns = [
-                re.escape(token.decode("utf-8"))  # Decode to string for regex
+                regex.escape(token.decode("utf-8"))  # Decode to string for regex
                 for token in sorted(
                     list(self._special_tokens_set), key=len, reverse=True
                 )
             ]
             # Use a capturing group for the pattern so `re.split` includes the delimiters
-            self._special_token_pattern = re.compile(
+            self._special_token_pattern = regex.compile(
                 "(" + "|".join(special_token_re_patterns) + ")"
             )
 
@@ -157,7 +157,7 @@ class Tokenizer:
 
         # Step 1: Split text by special tokens
         parts = (
-            re.split(self._special_token_pattern, text)
+            regex.split(self._special_token_pattern, text)
             if self._special_token_pattern
             else [text]
         )
@@ -175,7 +175,7 @@ class Tokenizer:
             else:
                 # THIS IS THE KEY CHANGE
                 # Use the pre-tokenization regex pattern to split the part into words
-                pre_tokens = re.findall(self._PAT, part)
+                pre_tokens = regex.findall(self._PAT, part)
                 for pre_token in pre_tokens:
                     pre_token_bytes = pre_token.encode("utf-8")
 
@@ -198,8 +198,8 @@ class Tokenizer:
     # The original _apply_all_merges, without the hardcoded blacklist
     def _apply_all_merges(self, tokens: list[bytes]) -> list[bytes]:
         """
-        Applies all defined BPE merges to a list of byte tokens iteratively
-        until no more merges are possible according to the defined merge rules.
+        Applies BPE merges to a list of byte tokens iteratively
+        by finding the most frequent pair to merge at each step.
 
         Args:
             tokens: A list of byte tokens.
@@ -207,23 +207,38 @@ class Tokenizer:
         Returns:
             A list of byte tokens after all applicable merges have been performed.
         """
+        if not self._merge_ranks:
+            return tokens
+
         current_tokens = list(tokens)
-        for pair1, pair2 in self._merges_list:
-            merged_token = pair1 + pair2
-            new_tokens = []
-            i = 0
-            while i < len(current_tokens):
-                if (
-                    i + 1 < len(current_tokens)
-                    and current_tokens[i] == pair1
-                    and current_tokens[i + 1] == pair2
-                ):
-                    new_tokens.append(merged_token)
-                    i += 2
-                else:
-                    new_tokens.append(current_tokens[i])
-                    i += 1
-            current_tokens = new_tokens
+        
+
+        while True:
+            # Find the best (lowest rank) pair to merge
+            best_pair_rank = float('inf')
+            best_pair_index = -1
+            
+            # Iterate through adjacent pairs to find the one with the lowest rank
+            # This is the greedy approach
+            for i in range(len(current_tokens) - 1):
+                pair = (current_tokens[i], current_tokens[i+1])
+                rank = self._merge_ranks.get(pair)
+                if rank is not None and rank < best_pair_rank:
+                    best_pair_rank = rank
+                    best_pair_index = i
+            
+            # If no more pairs can be merged, break the loop
+            if best_pair_index == -1:
+                break
+            
+            # Perform the merge operation
+            i = best_pair_index
+            pair_to_merge = (current_tokens[i], current_tokens[i+1])
+            merged_token = pair_to_merge[0] + pair_to_merge[1]
+            
+            # Replace the two tokens with the new merged token
+            current_tokens[i:i+2] = [merged_token]
+            
         return current_tokens
 
     def encode_iterable(self, iterable: Iterable[str]) -> Iterator[int]:
