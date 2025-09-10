@@ -278,8 +278,8 @@ def main():
         rope_theta=10000.0,
         learning_rate=1e-4,
         # IMPORTANT: Adjust these paths to your actual small binary data files
-        train_data_path="../data/val.bin", # Using val.bin for both for a quick test
-        val_data_path="../data/val.bin",
+        train_data_path="data/val.bin", # Using val.bin for both for a quick test
+        val_data_path="data/val.bin",
         checkpoint_dir="./my_model_checkpoints",
         device="mps"
     )
